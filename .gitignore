@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+
+# Virtual environment
+.venv/
+env/
+venv/
+
+# Environment variables & secrets
+.env
+.env.*
+!.env.example
+service_account.json
+
+# Node / React
+frontend/node_modules/
+frontend/.vite/
+frontend/dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# MacOS
+.DS_Store
+
+# VSCode
+.vscode/

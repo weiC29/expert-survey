@@ -1,0 +1,124 @@
+/* ---- Theme-aware tokens (play nice with MUI light/dark) ---- */
+:root {
+  color-scheme: light dark;
+
+  /* Light defaults */
+  --bg: #ffffff;
+  --text: #111827;
+  --muted: #6b7280;         /* neutral-500 */
+  --border: #e5e7eb;        /* neutral-200 */
+  --zebra: #f9fafb;         /* neutral-50 */
+  --chip-bg: #eef2ff;       /* indigo-50 */
+  --chip: #3730a3;          /* indigo-800 */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* App background (page) */
+    --bg: #0f172a;              /* slate-900 */
+
+    /* Text colors */
+    --text: #e5e7eb;            /* neutral-200 */
+    --muted: #9ca3af;           /* neutral-400 */
+
+    /* Surfaces & borders */
+    --surface: #111827;         /* neutral-900 (card surface) */
+    --surface-elevated: #0b1220;/* slightly darker outline backdrop */
+    --border: #2a3443;          /* slate-ish hairline */
+    --border-strong: #475569;    /* slate-500 for stronger outlines */
+
+    /* Zebra & chip accents */
+    --zebra: rgba(255,255,255,0.035);
+    --chip-bg: #0b2544;         /* deep indigo slate */
+    --chip: #9db8ff;            /* softer indigo for dark */
+  }
+}
+
+body {
+  margin: 0;
+}
+
+/* Optional link style (safe to keep/remove) */
+a { color: #3f51b5; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ---- Patient card container ---- */
+.patient-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow:
+    0 0 0 1px var(--surface-elevated) inset,   /* subtle inner edge */
+    0 8px 20px rgba(0,0,0,0.25);               /* soft elevation */
+}
+
+/* Optional ribbon/chip (e.g., “Row 14 • claimed …”) */
+.patient-chip {
+  display: inline-block;
+  background: var(--chip-bg);
+  color: var(--chip);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+
+/* ---- Two-column grid of key/value pairs ---- */
+.patient-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 28px;
+  row-gap: 12px;
+}
+
+/* Each pair is its own mini row */
+.patient-pair {
+  display: grid;
+  grid-template-columns: 0.55fr 0.45fr;
+  align-items: start;
+  gap: 6px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--zebra);
+}
+
+/* Subtle zebra to break up the page */
+.patient-pair:nth-child(odd) {
+  background: var(--zebra);
+}
+
+/* Label (left cell) */
+.patient-label {
+  color: var(--muted);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+/* Value (right cell) */
+.patient-value {
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+/* Tighten big blocks into 1 column on small screens */
+@media (max-width: 720px) {
+  .patient-grid {
+    grid-template-columns: 1fr;
+  }
+  .patient-pair {
+    grid-template-columns: 1fr;  /* label above value */
+  }
+}
+
+/* Space beneath cards so content below breathes */
+.patient-card + .patient-card {
+  margin-top: 16px;
+}
