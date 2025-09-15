@@ -21,20 +21,24 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",   # good for localhost http
     SESSION_COOKIE_SECURE=False,     # set True only when serving over HTTPS
 )
+
 Session(app)
+
+# --- Allowed Origin from environment ---
+ALLOW_ORIGIN = os.environ.get("ALLOW_ORIGIN", "http://localhost:5173")
 
 # --- CORS config (single place) ---
 # Allow the React dev server to call /api/* and send cookies
 CORS(
     app,
-    resources={r"/api/*": {"origins": ["http://localhost:5173"]}},
+    resources={r"/api/*": {"origins": [ALLOW_ORIGIN]}},
     supports_credentials=True,
 )
 
 # Extra safety: fallback CORS headers for all responses (should rarely be needed)
 @app.after_request
 def add_cors_headers(resp):
-    resp.headers.setdefault("Access-Control-Allow-Origin", "http://localhost:5173")
+    resp.headers.setdefault("Access-Control-Allow-Origin", ALLOW_ORIGIN)
     resp.headers.setdefault("Access-Control-Allow-Credentials", "true")
     resp.headers.setdefault("Vary", "Origin")
     return resp
