@@ -3,7 +3,7 @@ import io
 from datetime import timedelta
 
 from flask import Flask, request, session, jsonify, send_file
-#from flask_cors import CORS
+from flask_cors import CORS
 from flask_session import Session
 from dotenv import load_dotenv
 
@@ -25,26 +25,29 @@ Session(app)
 
 # --- CORS config (single place) ---
 # Allow the React dev server to call /api/* and send cookies
-"""
 CORS(
     app,
     resources={r"/api/*": {"origins": ["http://localhost:5173"]}},
     supports_credentials=True,
 )
-"""
 
-# Extra safety: guarantee credentials headers on every response
+# Extra safety: fallback CORS headers for all responses (should rarely be needed)
 @app.after_request
 def add_cors_headers(resp):
-    origin = request.headers.get("Origin")
-    if origin:
-        resp.headers["Access-Control-Allow-Origin"] = origin
-    else:
-        # sensible default for local dev
-        resp.headers["Access-Control-Allow-Origin"] = "http://localhost:5173"
-    resp.headers["Access-Control-Allow-Credentials"] = "true"
-    resp.headers["Vary"] = "Origin"
+    resp.headers.setdefault("Access-Control-Allow-Origin", "http://localhost:5173")
+    resp.headers.setdefault("Access-Control-Allow-Credentials", "true")
+    resp.headers.setdefault("Vary", "Origin")
     return resp
+
+# ---------- landing ----------
+@app.get("/")
+def landing():
+    return jsonify(
+        ok=True,
+        service="expert-survey-backend",
+        message="Backend is live. Use the /api/* endpoints.",
+        endpoints=["/api/health", "/api/get_user", "/api/patients", "/api/patient", "/api/claim", "/api/release", "/api/submit_prediction", "/api/update_prediction", "/api/csv"]
+    )
 
 # ---------- basic ----------
 @app.get("/api/health")
@@ -120,10 +123,6 @@ def release_patient():
         return jsonify(res), 400
     return jsonify(res)
 
-@app.post("/api/admin/release_stale")
-def admin_release_stale():
-    # stale auto-release disabled; kept for compatibility
-    return jsonify(ok=True)
 
 @app.post("/api/update_prediction")
 def update_prediction_route():
