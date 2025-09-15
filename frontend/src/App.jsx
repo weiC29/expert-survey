@@ -6,6 +6,9 @@ import {
   RadioGroup, FormControlLabel, Radio, Slider, Stack
 } from "@mui/material";
 
+// Show debug UI in dev or when explicitly enabled via env
+const SHOW_DEBUG = (import.meta.env && import.meta.env.DEV) || (import.meta.env && import.meta.env.VITE_SHOW_DEBUG === 'true');
+
 const API = "/api";
 axios.defaults.withCredentials = true;
 const api = axios.create({ baseURL: API, withCredentials: true });
@@ -278,10 +281,12 @@ export default function App() {
   return (
     <Container maxWidth="md" sx={{ py: 3 }}>
       <Typography variant="h5" gutterBottom>Expert Survey</Typography>
-      <Typography variant="body2" sx={{ mb: 2 }}>
-        API: <code>{apiBase}</code> • Health:{" "}
-        {healthOK ? <span style={{color:"green"}}>Available ✅</span> : <span style={{color:"red"}}>Unavailable ❌</span>}
-      </Typography>
+      {SHOW_DEBUG && (
+        <Typography variant="body2" sx={{ mb: 2 }}>
+          API: <code>{apiBase}</code> • Health:{" "}
+          {healthOK ? <span style={{color:"green"}}>Available ✅</span> : <span style={{color:"red"}}>Unavailable ❌</span>}
+        </Typography>
+      )}
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
@@ -406,13 +411,14 @@ export default function App() {
             </Stack>
           </Paper>
 
-          {/* debug */}
-          <Paper sx={{ p:2 }}>
-            <Typography variant="h6" gutterBottom>Debug Panel</Typography>
-            <pre style={{whiteSpace:"pre-wrap"}}>
+          {SHOW_DEBUG && (
+            <Paper sx={{ p:2 }}>
+              <Typography variant="h6" gutterBottom>Debug Panel</Typography>
+              <pre style={{whiteSpace:"pre-wrap"}}>
 {JSON.stringify({ health: { ok: healthOK }, user, patients }, null, 2)}
-            </pre>
-          </Paper>
+              </pre>
+            </Paper>
+          )}
         </Stack>
       )}
 
@@ -587,13 +593,14 @@ export default function App() {
             </Stack>
           </Paper>
 
-          {/* debug */}
-          <Paper sx={{ p:2 }}>
-            <Typography variant="h6" gutterBottom>Debug Panel</Typography>
-            <pre style={{whiteSpace:"pre-wrap"}}>
+          {SHOW_DEBUG && (
+              <Paper sx={{ p:2 }}>
+                <Typography variant="h6" gutterBottom>Debug Panel</Typography>
+                <pre style={{whiteSpace:"pre-wrap"}}>
 {JSON.stringify({ active }, null, 2)}
-            </pre>
-          </Paper>
+                </pre>
+              </Paper>
+            )}
         </Stack>
       )}
     </Container>
