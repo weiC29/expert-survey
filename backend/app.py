@@ -14,8 +14,9 @@ import sheets  # uses env inside
 app = Flask(__name__)
 
 # --- Flask / Session + CORS config (env-driven) ---
-# Frontend origin (dev: http://localhost:5173, prod: your Vercel URL)
-ALLOW_ORIGIN = os.environ.get("ALLOW_ORIGIN", "http://localhost:5173")
+# Allowed frontend origins (comma-separated). Backward compatible with old ALLOW_ORIGIN.
+_ORIGINS_ENV = os.environ.get("ALLOWED_ORIGINS") or os.environ.get("ALLOW_ORIGIN", "http://localhost:5173")
+ALLOWED_ORIGINS = [o.strip().rstrip("/") for o in _ORIGINS_ENV.split(",") if o.strip()]
 
 # Cookie flags: in production across domains you MUST use None/True
 COOKIE_SAMESITE = os.environ.get("COOKIE_SAMESITE", "Lax")            # "Lax" (dev) or "None" (prod)
@@ -34,16 +35,27 @@ Session(app)
 # CORS for API
 CORS(
     app,
-    resources={r"/api/*": {"origins": [ALLOW_ORIGIN]}},
+    resources={r"/api/*": {"origins": ALLOWED_ORIGINS}},
     supports_credentials=True,
 )
 
 @app.after_request
 def add_cors_headers(resp):
-    # helpful when an upstream proxy strips CORS headers
-    resp.headers.setdefault("Access-Control-Allow-Origin", ALLOW_ORIGIN)
-    resp.headers.setdefault("Access-Control-Allow-Credentials", "true")
-    resp.headers.setdefault("Vary", "Origin")
+    """
+    Ensure CORS headers are present even if an upstream proxy strips them.
+    We mirror the request's Origin only if it is explicitly allowed.
+    """
+    origin = (request.headers.get("Origin") or "").rstrip("/")
+    if origin and origin in ALLOWED_ORIGINS:
+        resp.headers["Access-Control-Allow-Origin"] = origin
+        resp.headers["Access-Control-Allow-Credentials"] = "true"
+        # make caches vary properly by Origin
+        vary = resp.headers.get("Vary")
+        if vary:
+            if "Origin" not in vary:
+                resp.headers["Vary"] = vary + ", Origin"
+        else:
+            resp.headers["Vary"] = "Origin"
     return resp
 
 # ---------- landing ----------
