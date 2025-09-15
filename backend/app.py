@@ -13,31 +13,34 @@ import sheets  # uses env inside
 
 app = Flask(__name__)
 
-# --- Flask / Session config ---
+# --- Flask / Session + CORS config (env-driven) ---
+# Frontend origin (dev: http://localhost:5173, prod: your Vercel URL)
+ALLOW_ORIGIN = os.environ.get("ALLOW_ORIGIN", "http://localhost:5173")
+
+# Cookie flags: in production across domains you MUST use None/True
+COOKIE_SAMESITE = os.environ.get("COOKIE_SAMESITE", "Lax")            # "Lax" (dev) or "None" (prod)
+COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "false").lower() == "true"  # True in prod (HTTPS)
+
 app.config.update(
     SECRET_KEY=os.environ.get("FLASK_SECRET", "change_me"),
     SESSION_TYPE="filesystem",
     PERMANENT_SESSION_LIFETIME=timedelta(days=14),
-    SESSION_COOKIE_SAMESITE="Lax",   # good for localhost http
-    SESSION_COOKIE_SECURE=False,     # set True only when serving over HTTPS
+    SESSION_COOKIE_SAMESITE=COOKIE_SAMESITE,
+    SESSION_COOKIE_SECURE=COOKIE_SECURE,
 )
 
 Session(app)
 
-# --- Allowed Origin from environment ---
-ALLOW_ORIGIN = os.environ.get("ALLOW_ORIGIN", "http://localhost:5173")
-
-# --- CORS config (single place) ---
-# Allow the React dev server to call /api/* and send cookies
+# CORS for API
 CORS(
     app,
     resources={r"/api/*": {"origins": [ALLOW_ORIGIN]}},
     supports_credentials=True,
 )
 
-# Extra safety: fallback CORS headers for all responses (should rarely be needed)
 @app.after_request
 def add_cors_headers(resp):
+    # helpful when an upstream proxy strips CORS headers
     resp.headers.setdefault("Access-Control-Allow-Origin", ALLOW_ORIGIN)
     resp.headers.setdefault("Access-Control-Allow-Credentials", "true")
     resp.headers.setdefault("Vary", "Origin")
