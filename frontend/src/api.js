@@ -1,7 +1,26 @@
 import axios from "axios";
 
-const API_BASE =
-  import.meta.env.VITE_API_BASE || "http://localhost:5001/api";
+function resolveApiBase() {
+  const envBase = (import.meta?.env?.VITE_API_BASE || "").trim();
+
+  if (envBase) {
+    return stripTrailingSlash(envBase);
+  }
+
+  // Heuristic: Production on Vercel without env var set
+  if (typeof window !== "undefined" && window.location.hostname.endsWith("vercel.app")) {
+    return "https://expert-survey.onrender.com/api";
+  }
+
+  // Local dev default
+  return "http://localhost:5001/api";
+}
+
+function stripTrailingSlash(url) {
+  return url.endsWith("/") ? url.slice(0, -1) : url;
+}
+
+const API_BASE = resolveApiBase();
 
 const api = axios.create({
   baseURL: API_BASE,
