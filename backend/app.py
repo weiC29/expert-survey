@@ -119,8 +119,18 @@ def next_patient_route():
 
 @app.get("/api/metrics")
 def metrics():
-    data = sheets.progress_metrics()
-    return jsonify(ok=True, **data)
+    try:
+        data = sheets.progress_metrics()
+        return jsonify(ok=True, **data)
+    except Exception as e:
+        # Log to Render logs and return safe defaults so the UI doesn't break
+        try:
+            import traceback
+            print("ERROR in /api/metrics:", e)
+            traceback.print_exc()
+        except Exception:
+            pass
+        return jsonify(ok=False, users_started=0, users_completed=0, total_patients=0), 200
 
 # ---------- patients ----------
 @app.get("/api/patients")
