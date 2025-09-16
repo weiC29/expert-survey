@@ -47,7 +47,8 @@ function usePatients() {
 
 /** Clean two-column patient card (clinical fields only) */
 function PatientCard({ record }) {
-  if (!record) return null;
+  const data = (record && typeof record === "object" && "record" in record) ? record.record : record;
+  if (!data) return null;
 
   const ADMIN = new Set([
     "expert_prediction", "expert_confidence", "expert_SNOT22score_prediction",
@@ -68,8 +69,8 @@ function PatientCard({ record }) {
     k.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (m) => m.toUpperCase());
 
   // Build [key,value] list in ORDER first, then append any remaining non-admin fields
-  const orderedKeys = ORDER.filter(k => record[k] !== undefined);
-  const restKeys = Object.keys(record)
+  const orderedKeys = ORDER.filter(k => data[k] !== undefined);
+  const restKeys = Object.keys(data)
     .filter(k => !ADMIN.has(k) && !orderedKeys.includes(k))
     .sort((a,b) => a.localeCompare(b));
 
@@ -79,7 +80,7 @@ function PatientCard({ record }) {
     <div className="patient-card">
       <div className="patient-grid">
         {keys.map((k) => {
-          const v = record[k];
+          const v = data[k];
           if (v === "" || v === undefined || v === null) return null;
           return (
             <div className="patient-pair" key={k}>
