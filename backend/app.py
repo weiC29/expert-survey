@@ -65,7 +65,7 @@ def landing():
         ok=True,
         service="expert-survey-backend",
         message="Backend is live. Use the /api/* endpoints.",
-        endpoints=["/api/health", "/api/get_user", "/api/user_progress", "/api/next_patient", "/api/patients", "/api/patient", "/api/claim", "/api/release", "/api/submit_prediction", "/api/update_prediction", "/api/csv"]
+        endpoints=["/api/health", "/api/get_user", "/api/user_progress", "/api/next_patient", "/api/patients", "/api/patient", "/api/claim", "/api/release", "/api/submit_prediction", "/api/update_prediction", "/api/csv", "/api/metrics"]
     )
 
 # ---------- basic ----------
@@ -116,6 +116,11 @@ def next_patient_route():
     rec = sheets.get_patient(nxt)
     my = sheets.get_submission(email, nxt)
     return jsonify(ok=True, row=nxt, record=rec, my_submission=my)
+
+@app.get("/api/metrics")
+def metrics():
+    data = sheets.progress_metrics()
+    return jsonify(ok=True, **data)
 
 # ---------- patients ----------
 @app.get("/api/patients")
