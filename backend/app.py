@@ -65,7 +65,7 @@ def landing():
         ok=True,
         service="expert-survey-backend",
         message="Backend is live. Use the /api/* endpoints.",
-        endpoints=["/api/health", "/api/get_user", "/api/patients", "/api/patient", "/api/claim", "/api/release", "/api/submit_prediction", "/api/update_prediction", "/api/csv"]
+        endpoints=["/api/health", "/api/get_user", "/api/user_progress", "/api/next_patient", "/api/patients", "/api/patient", "/api/claim", "/api/release", "/api/submit_prediction", "/api/update_prediction", "/api/csv"]
     )
 
 # ---------- basic ----------
@@ -88,6 +88,35 @@ def set_user():
 def get_user():
     return {"ok": True, "user": session.get("user")}
 
+# ---------- user progress & next ----------
+@app.get("/api/user_progress")
+def user_progress():
+    user = session.get("user")
+    if not user:
+        return jsonify(ok=False, error="no user"), 401
+    email = user.get("email")
+    total = sheets.count_patients()
+    completed = len(sheets.list_user_submission_rows(email))
+    next_row = sheets.next_unsubmitted_row(email)
+    return jsonify(ok=True, completed=completed, total=total, next_row=next_row)
+
+@app.get("/api/next_patient")
+def next_patient_route():
+    user = session.get("user")
+    if not user:
+        return jsonify(ok=False, error="no user"), 401
+    email = user.get("email")
+    try:
+        after = request.args.get("after", default=None, type=int)
+    except Exception:
+        after = None
+    nxt = sheets.next_unsubmitted_row(email, after=after)
+    if nxt is None:
+        return jsonify(ok=True, complete=True)
+    rec = sheets.get_patient(nxt)
+    my = sheets.get_submission(email, nxt)
+    return jsonify(ok=True, row=nxt, record=rec, my_submission=my)
+
 # ---------- patients ----------
 @app.get("/api/patients")
 def list_patients_route():
@@ -105,6 +134,13 @@ def get_patient_route():
     rec = sheets.get_patient(row)
     if not rec:
         return jsonify(ok=False, error="not found"), 404
+    # Backward compatible: by default return the raw patient record (old behavior).
+    include_my = request.args.get("include_my")
+    if include_my in {"1", "true", "True"}:
+        user = session.get("user") or {}
+        email = user.get("email")
+        my = sheets.get_submission(email, row) if email else None
+        return jsonify({"row": row, "record": rec, "my_submission": my})
     return jsonify(rec)
 
 # ---------- claim / release ----------
@@ -113,34 +149,16 @@ def claim_patient():
     user = session.get("user")
     if not user:
         return jsonify(ok=False, error="no user"), 401
-
-    data = request.get_json(silent=True) or {}
-    row = int(data.get("row", 0))
-
-    #auto-release a previous in-progress claim by the same user
-    prev = data.get("prev_row")
-    if prev is not None:
-        try:
-            sheets.release_row(int(prev), user.get("email", ""))
-        except Exception:
-            pass
-
-    res = sheets.claim_row(row, user.get("email", ""))
-    if not res.get("ok"):
-        return jsonify(res), 400
-    return jsonify(res)
+    # New model: claim is a no-op (everyone can work independently).
+    return jsonify(ok=True)
 
 @app.post("/api/release")
 def release_patient():
     user = session.get("user")
     if not user:
         return jsonify(ok=False, error="no user"), 401
-    data = request.get_json(silent=True) or {}
-    row = int(data.get("row", 0))
-    res = sheets.release_row(row, user.get("email", ""))
-    if not res.get("ok"):
-        return jsonify(res), 400
-    return jsonify(res)
+    # New model: release is a no-op.
+    return jsonify(ok=True)
 
 
 @app.post("/api/update_prediction")
@@ -180,15 +198,14 @@ def submit_prediction_route():
         return jsonify(ok=False, error="bad row"), 400
 
     payload = {
-        "name": user["name"],
-        "email": user["email"],
         "outcome": data.get("outcome"),
         "confidence": data.get("confidence"),
         "snot22": data.get("snot22"),
     }
-    ok = sheets.submit_prediction(row, payload)
-    if not ok:
-        return jsonify(ok=False, error="not allowed or locked by another"), 400
+    try:
+        sheets.upsert_submission(user["email"], user["name"], row, payload)
+    except Exception as e:
+        return jsonify(ok=False, error=str(e)), 400
     return jsonify(ok=True)
 
 @app.get("/api/csv")

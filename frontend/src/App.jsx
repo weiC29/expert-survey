@@ -99,7 +99,9 @@ export default function App() {
   const { patients, refresh } = usePatients();
 
   const [view, setView] = useState("menu"); // menu | predict
-  const [resumeDone, setResumeDone] = useState(false); // run auto-resume once
+  const [progress, setProgress] = useState({ completed: 0, total: 0 });
+  const [metrics, setMetrics] = useState({ users_started: 0, users_completed: 0, total_patients: 0 });
+  const [allDone, setAllDone] = useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
 
@@ -109,8 +111,6 @@ export default function App() {
   const [conf, setConf] = useState("Somewhat confident");
   const [snot, setSnot] = useState(24);
   const [error, setError] = useState("");
-  const [lastClaimedRow, setLastClaimedRow] = useState(null);
-  const [resumedRow, setResumedRow] = useState(null);
 
   const apiBase = API;
 
@@ -120,113 +120,95 @@ export default function App() {
     return patients.find(p => p.row === r) || null;
   }, [pickRow, patients]);
 
-  // Preselect first available on menu load
-  useEffect(() => {
-    if (user && view === "menu" && patients.length > 0) {
-      const firstAvail = patients.find(p => p.available) || null;
-      if (firstAvail) setPickRow(String(firstAvail.row));
+
+  async function refreshProgress() {
+    try {
+      const r = await api.get("/user_progress");
+      const { completed = 0, total = 0 } = r.data || {};
+      setProgress({ completed, total });
+    } catch {
+      setProgress({ completed: 0, total: 0 });
     }
-  }, [user, patients, view]);
+  }
 
-  // Auto-resume (once) a row already claimed by this user
-  useEffect(() => {
-    if (resumeDone) return;
-    if (!user || patients.length === 0) return;
-    if (view !== "menu") return;
-    const mine = patients.find(p => p.locked_by_you && !p.submitted);
-    if (!mine) { setResumeDone(true); return; }
+  async function refreshMetrics() {
+    try {
+      const r = await api.get("/metrics");
+      const d = r.data || {};
+      setMetrics({
+        users_started: d.users_started || 0,
+        users_completed: d.users_completed || 0,
+        total_patients: d.total_patients || 0
+      });
+    } catch {
+      setMetrics({ users_started: 0, users_completed: 0, total_patients: 0 });
+    }
+  }
 
-    const rowNum = mine.row;
+  function prefillFromMySubmission(rec) {
+    const my = rec?.my_submission;
+    if (my && my.outcome !== undefined && my.outcome !== "") {
+      const v = Number(my.outcome);
+      if (!Number.isNaN(v)) setOutcome(v);
+    }
+    if (my && my.confidence !== undefined && my.confidence !== "") {
+      setConf(String(my.confidence));
+    }
+    if (my && my.snot22 !== undefined && my.snot22 !== "") {
+      const sv = Number(my.snot22);
+      if (!Number.isNaN(sv)) setSnot(sv);
+    }
+  }
+
+  async function loadPatient(rowNum) {
+    if (!rowNum) return;
+    const rec = await api.get("/patient", { params: { row: rowNum, include_my: 1 } });
+    setActive(rec.data);
+    prefillFromMySubmission(rec.data);
     setPickRow(String(rowNum));
-    (async () => {
-      try {
-        await api.post("/claim", { row: rowNum });
-        const rec = await api.get("/patient", { params: { row: rowNum } });
-        setActive(rec.data);
-        setView("predict");
-        setResumedRow(rowNum);
-        setResumeDone(true);
-      } catch {
-        setResumeDone(true);
-      }
-    })();
-  }, [user, patients, view, resumeDone]);
+    setAllDone(false);
+  }
 
-  // If you switch the dropdown while in predict view, load that record
+  async function loadNext(afterRow = null) {
+    const r = await api.get("/next_patient", { params: { after: afterRow ?? undefined } });
+    if (r.data?.complete) {
+      setActive(null);
+      setPickRow("");
+      setAllDone(true);
+      return { complete: true };
+    }
+    setActive(r.data);
+    prefillFromMySubmission(r.data);
+    setPickRow(String(r.data.row));
+    setAllDone(false);
+    return { complete: false, row: r.data.row };
+  }
+
+  // If you switch the dropdown while in predict view, load that record (and prefill from your submission)
   useEffect(() => {
     if (view !== "predict" || !pickRow) return;
     const rowNum = Number(pickRow);
     if (!rowNum) return;
     (async () => {
       try {
-        const rec = await api.get("/patient", { params: { row: rowNum } });
-        setActive(rec.data);
-
-        const r = rec.data?.record || {};
-        if (r.expert_prediction !== undefined && r.expert_prediction !== "") {
-          const v = Number(r.expert_prediction);
-          if (!Number.isNaN(v)) setOutcome(v);
-        }
-        if (r.expert_confidence) {
-          setConf(String(r.expert_confidence));
-        }
-        if (r.expert_SNOT22score_prediction !== undefined && r.expert_SNOT22score_prediction !== "") {
-          const sv = Number(r.expert_SNOT22score_prediction);
-          if (!Number.isNaN(sv)) setSnot(sv);
-        }
+        await loadPatient(rowNum);
       } catch {
         setError("Failed to load patient data.");
       }
     })();
   }, [pickRow, view]);
 
-  const claimedByYou = useMemo(() => {
-    if (!active || !user) return false;
-    return active.record?.claimed_by === user.email && !active.record?.submitted;
-    // submitted rows should never be considered claimable
-  }, [active, user]);
-
-  const isSubmitted = !!active?.record?.submitted ||
-  (String(active?.record?.submission_status || "").toLowerCase() === "submitted");
-
-  const canEdit = useMemo(() => {
-    if (!user || !active) return false;
-    // Prefer the list's can_edit if present; fall back to reviewer_email match
-    const fromList = patients.find(p => p.row === active.row)?.can_edit;
-    if (fromList !== undefined) return !!fromList;
-    return String(active.record?.reviewer_email || "").toLowerCase() === String(user.email || "").toLowerCase();
-  }, [user, active, patients]);
-
-  const formDisabled = isSubmitted && !canEdit;
-
   async function handleSaveUser() {
     setError("");
     try {
       await save(name.trim(), email.trim());
-      await refresh();
+      await refresh();           // refresh list for dropdown
+      await refreshProgress();   // load completed/total
+      await refreshMetrics();
+      await loadNext(null);      // load first unsubmitted
+      setView("predict");
     } catch {
       setError("Could not save user.");
-    }
-  }
-
-  async function claimSelected(where = "menu") {
-    setError("");
-    const rowNum = Number(where === "menu" ? pickRow : active?.row);
-    if (!rowNum) { setError("Please choose a patient."); return; }
-    try {
-      const payload = { row: rowNum };
-      if (lastClaimedRow && lastClaimedRow !== rowNum) payload.prev_row = lastClaimedRow;
-      await api.post("/claim", payload);
-      const rec = await api.get("/patient", { params: { row: rowNum } });
-      setActive(rec.data);
-      setView("predict");
-      setPickRow(String(rowNum));
-      setLastClaimedRow(rowNum);
-      setResumeDone(true);
-      await refresh();
-    } catch (e) {
-      setError(e?.response?.data?.error || "Unable to claim this patient.");
-      await refresh();
     }
   }
 
@@ -239,44 +221,37 @@ export default function App() {
         confidence: conf,
         snot22: snot,
       });
-      setActive(null);
-      setView("menu");
-      setPickRow("");
-      setResumedRow(null);
-      await refresh();
+      await refreshProgress();
+      await refreshMetrics();
+      const next = await loadNext(active.row);
+      if (next.complete) {
+        setAllDone(true);
+      }
+      await refresh(); // update dropdown list if needed
     } catch (e) {
       setError(e?.response?.data?.error || "Submit failed.");
     }
   }
 
-  async function updatePrediction() {
-    if (!active) return;
-    try {
-      await api.post("/update_prediction", {
-        row: active.row,
-        outcome,
-        confidence: conf,
-        snot22: snot,
-      });
-      setActive(null);
-      setView("menu");
-      setPickRow("");
-      setResumedRow(null);
-      await refresh();
-    } catch (e) {
-      setError(e?.response?.data?.error || "Update failed.");
+  // Auto-boot to Predict when a session already exists
+  useEffect(() => {
+    if (user && view === "menu") {
+      (async () => {
+        try {
+          await refresh();
+          await refreshProgress();
+          await refreshMetrics();
+          await loadNext(null);
+          setView("predict");
+        } catch {
+          // ignore
+        }
+      })();
     }
-  }
+  }, [user, view]);
 
   // --------- UI ---------
 
-  // Memo for whether the selected patient is claimable
-  const canClaimSelected = useMemo(() => {
-    if (!user || !selectedPatient) return false;
-    // Not submitted and (available or claimed by current user)
-    if (selectedPatient.submitted) return false;
-    return (!selectedPatient.claimed_by || selectedPatient.claimed_by === user.email);
-  }, [user, selectedPatient]);
 
   return (
     <Container maxWidth="md" sx={{ py: 3 }}>
@@ -309,107 +284,38 @@ export default function App() {
             )}
           </Paper>
 
-          {/* patient chooser + actions */}
-          <Paper sx={{ p:2 }}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-              <Typography variant="h6">Patients</Typography>
-              <Stack direction="row" spacing={2} alignItems="center">
-                <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: "nowrap" }}>
-                  selectable: {patients.filter(p => (p.submitted ? false : (!p.claimed_by || (user && p.claimed_by === user.email)))).length} / total: {patients.length}
-                </Typography>
-                <Button size="small" onClick={refresh}>Refresh</Button>
-              </Stack>
-            </Stack>
+          {(metrics.total_patients > 0) && (
+            <Paper sx={{ p:2 }}>
+              <Typography variant="h6" gutterBottom>Cohort Progress</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Experts started: {metrics.users_started} • Finished all {metrics.total_patients}: {metrics.users_completed}
+              </Typography>
+            </Paper>
+          )}
 
-            {selectedPatient?.submitted && (
-              <Alert
-                severity={selectedPatient.can_edit ? "info" : "error"}
-                sx={{ mb: 2 }}
-              >
-                {selectedPatient.can_edit
-                  ? "You previously submitted this patient. You can edit your submission."
-                  : "This patient has already been completed."}
-              </Alert>
-            )}
-
-            <Stack direction={{ xs:"column", sm:"row" }} spacing={2} alignItems="center">
-              <FormControl size="small" fullWidth sx={{ minWidth: 260, mb: { xs: 1, sm: 0 } }}>
-                <InputLabel id="pick-label">Choose patient (by row)</InputLabel>
-                <Select
-                  labelId="pick-label"
-                  label="Choose patient (by row)"
-                  value={pickRow}
-                  onChange={(e)=>setPickRow(e.target.value)}
-                  displayEmpty
-                >
-                  {patients.length === 0 && (
-                    <MenuItem value="" disabled>(no patients loaded)</MenuItem>
-                  )}
-
-                  {patients.map(p => {
-                    const label = (() => {
-                      if (p.submitted) {
-                        return `Row ${p.row} • submitted${user && p.can_edit ? " (yours — editable)" : ""}`;
-                      }
-                      if (p.claimed_by) {
-                        return `Row ${p.row} • claimed by ${p.claimed_by}${p.claimed_at ? ` at ${new Date(p.claimed_at).toLocaleString()}` : ""}`;
-                      }
-                      return `Row ${p.row} • available`;
-                    })();
-
-                    const selectable = p.submitted
-                      ? !!(user && p.can_edit)                 // allow selecting submitted rows if you can edit
-                      : (!p.claimed_by || (user && p.claimed_by === user.email));
-
-                    return (
-                      <MenuItem key={p.row} value={String(p.row)} disabled={!selectable}>
-                        {label}
-                      </MenuItem>
-                    );
-                  })}
-                </Select>
-              </FormControl>
-
-              <Button
-                variant="contained"
-                onClick={async()=>{
-                  if (!selectedPatient) return;
-                  if (selectedPatient.submitted && selectedPatient.can_edit) {
-                    // Load for edit without claiming
-                    const r = await api.get("/patient", { params: { row: selectedPatient.row } });
-                    setActive(r.data);
-                    setView("predict");
-                    setResumedRow(null);
-                    setLastClaimedRow(null);
-                  } else {
-                    await claimSelected("menu");
-                  }
-                }}
-                disabled={
-                  !user ||
-                  !selectedPatient ||
-                  (selectedPatient.submitted
-                    ? !selectedPatient.can_edit
-                    : !!(selectedPatient.claimed_by && selectedPatient.claimed_by !== user?.email))
-                }
-              >
-                {selectedPatient?.submitted ? "Edit Submission" : "Claim & Predict"}
-              </Button>
-
-              <Button
-                variant="outlined"
-                onClick={async()=>{
-                  const r = await api.get("/csv", { responseType:"blob" });
-                  const url = URL.createObjectURL(r.data);
-                  const a = document.createElement("a");
-                  a.href = url; a.download = "expert_predictions.csv"; a.click();
-                  URL.revokeObjectURL(url);
-                }}
-              >
-                Download CSV
-              </Button>
-            </Stack>
-          </Paper>
+      {/* data / csv only */}
+      <Paper sx={{ p:2 }}>
+        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+          <Typography variant="h6">Data</Typography>
+          {user && (
+            <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: "nowrap" }}>
+              Remaining: {Math.max(0, (progress.total - progress.completed))} / total: {progress.total}
+            </Typography>
+          )}
+        </Stack>
+        <Button
+          variant="outlined"
+          onClick={async()=>{
+            const r = await api.get("/csv", { responseType:"blob" });
+            const url = URL.createObjectURL(r.data);
+            const a = document.createElement("a");
+            a.href = url; a.download = "expert_predictions.csv"; a.click();
+            URL.revokeObjectURL(url);
+          }}
+        >
+          Download CSV
+        </Button>
+      </Paper>
 
           {SHOW_DEBUG && (
             <Paper sx={{ p:2 }}>
@@ -433,8 +339,6 @@ export default function App() {
                   setActive(null);
                   setView("menu");
                   setPickRow("");
-                  setResumedRow(null);
-                  setResumeDone(true);
                 }}
               >
                 Back to Menu
@@ -443,78 +347,38 @@ export default function App() {
           </Paper>
 
           <Paper sx={{ p:2 }}>
-            {resumedRow && active?.row === resumedRow && (
-              <Alert severity="info" sx={{ mb: 2 }}>
-                Resumed your in-progress patient (row {resumedRow}).
-              </Alert>
-            )}
-
             <Typography variant="h6" gutterBottom>
-              Patient (row {active?.row})
+              Patient {active?.row ? `(row ${active.row})` : ""}
             </Typography>
-            {isSubmitted && canEdit && (
-              <Alert severity="info" sx={{ mb: 2 }}>
-                You previously submitted this patient. You can update your submission below.
-              </Alert>
-            )}
 
-            {isSubmitted && !canEdit && (
-              <Alert severity="error" sx={{ mb: 2 }}>
-                This patient has already been completed.
+            {/* progress */}
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Remaining: {Math.max(0, (progress.total - progress.completed))} / total: {progress.total}
+            </Typography>
+
+            {allDone && (
+              <Alert severity="success" sx={{ mb: 2 }}>
+                All patients completed. You can use the dropdown to review or edit your previous entries.
               </Alert>
             )}
 
             {/* switch within predict */}
             <Stack direction={{ xs:"column", sm:"row" }} spacing={2} alignItems="center" sx={{ mb: 2 }}>
               <FormControl size="small" fullWidth sx={{ minWidth: 260, mb: { xs: 1, sm: 0 } }}>
-                <InputLabel id="pick2-label">Switch patient</InputLabel>
+                <InputLabel id="pick2-label">Go to patient</InputLabel>
                 <Select
                   labelId="pick2-label"
-                  label="Switch patient"
+                  label="Go to patient"
                   value={pickRow}
                   onChange={(e)=>setPickRow(e.target.value)}
                 >
-                  {patients.map(p => {
-                    const label = `Row ${p.row}` +
-                      (p.submitted
-                        ? " • submitted"
-                        : p.claimed_by
-                          ? ` • claimed by ${p.claimed_by}${p.claimed_at ? ` at ${new Date(p.claimed_at).toLocaleString()}` : ""}`
-                          : " • available");
-                    const selectable = p.submitted
-                      ? false
-                      : (!p.claimed_by || (user && p.claimed_by === user.email));
-                    return (
-                      <MenuItem key={p.row} value={String(p.row)} disabled={!selectable}>
-                        {label}
-                      </MenuItem>
-                    );
-                  })}
+                  {patients.map(p => (
+                    <MenuItem key={p.row} value={String(p.row)}>
+                      {`Row ${p.row}`}
+                    </MenuItem>
+                  ))}
                 </Select>
               </FormControl>
-              <Button
-                variant="outlined"
-                onClick={async()=>{
-                  if (!selectedPatient) return;
-                  if (selectedPatient.submitted && selectedPatient.can_edit) {
-                    const r = await api.get("/patient", { params: { row: selectedPatient.row } });
-                    setActive(r.data);
-                  } else {
-                    await claimSelected("predict");
-                  }
-                }}
-                disabled={
-                  !user ||
-                  !pickRow ||
-                  (!selectedPatient
-                    ? true
-                    : (selectedPatient.submitted
-                        ? !selectedPatient.can_edit
-                        : !!(selectedPatient.claimed_by && selectedPatient.claimed_by !== user?.email)))
-                }
-              >
-                {selectedPatient?.submitted ? "Load For Edit" : "Claim / Load"}
-              </Button>
             </Stack>
 
             {/* clean two-column clinical display */}
@@ -531,15 +395,15 @@ export default function App() {
               Outcome (0 = Unsuccessful, 1 = Successful)
             </Typography>
             <RadioGroup row value={String(outcome)} onChange={(e)=>setOutcome(Number(e.target.value))} sx={{ mb: 2 }}>
-              <FormControlLabel value="0" control={<Radio />} label="0 — Unsuccessful" disabled={formDisabled} />
-              <FormControlLabel value="1" control={<Radio />} label="1 — Successful" disabled={formDisabled} />
+              <FormControlLabel value="0" control={<Radio />} label="0 — Unsuccessful" />
+              <FormControlLabel value="1" control={<Radio />} label="1 — Successful" />
             </RadioGroup>
 
             <Box sx={{ my: 2 }}>
               <Typography variant="body2" sx={{ mb: 1 }}>Confidence</Typography>
               <RadioGroup value={conf} onChange={(e)=>setConf(e.target.value)} sx={{ mb: 1 }}>
                 {["Very confident","Somewhat confident","Neutral","Somewhat unsure","Not at all confident"].map(c =>
-                  <FormControlLabel key={c} value={c} control={<Radio />} label={c} disabled={formDisabled} />
+                  <FormControlLabel key={c} value={c} control={<Radio />} label={c} />
                 )}
               </RadioGroup>
             </Box>
@@ -555,7 +419,6 @@ export default function App() {
                   value={snot}
                   onChange={(_, v) => setSnot(Array.isArray(v) ? v[0] : v)}
                   sx={{ maxWidth: 420 }}
-                  disabled={formDisabled}
                 />
                 <TextField
                   size="small"
@@ -563,33 +426,15 @@ export default function App() {
                   value={snot}
                   onChange={e=>setSnot(Number(e.target.value||0))}
                   sx={{ width: 90 }}
-                  disabled={formDisabled}
                 />
               </Stack>
               <Typography variant="caption">0 = no symptoms, 110 = worst.</Typography>
             </Box>
 
             <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="flex-start">
-              {!isSubmitted && (
-                <Button variant="contained" onClick={submitPrediction} disabled={!claimedByYou}>
-                  Submit
-                </Button>
-              )}
-              {isSubmitted && canEdit && (
-                <Button variant="contained" color="warning" onClick={updatePrediction}>
-                  Update Previous Submission
-                </Button>
-              )}
-              {!claimedByYou && !isSubmitted && (
-                <Alert severity="info">
-                  {active?.record?.claimed_by && active?.record?.claimed_by !== user?.email
-                    ? `This patient is currently claimed by ${active.record.claimed_by}.`
-                    : "You must claim this patient to submit."}
-                </Alert>
-              )}
-              {isSubmitted && !canEdit && (
-                <Alert severity="warning">Submission is already completed for this patient.</Alert>
-              )}
+              <Button variant="contained" onClick={submitPrediction}>
+                Save &amp; Next
+              </Button>
             </Stack>
           </Paper>
 
