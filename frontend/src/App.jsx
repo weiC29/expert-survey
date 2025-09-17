@@ -3,7 +3,7 @@ import axios from "axios";
 import {
   Container, Paper, Typography, TextField, Button,
   Box, Alert, Divider, MenuItem, Select, FormControl, InputLabel,
-  RadioGroup, FormControlLabel, Radio, Slider, Stack
+  RadioGroup, FormControlLabel, Radio, Slider, Stack, Snackbar
 } from "@mui/material";
 
 // Show debug UI in dev or when explicitly enabled via env
@@ -103,6 +103,18 @@ export default function App() {
   const [progress, setProgress] = useState({ completed: 0, total: 0 });
   const [metrics, setMetrics] = useState({ users_started: 0, users_completed: 0, total_patients: 0 });
   const [allDone, setAllDone] = useState(false);
+  const [doneMap, setDoneMap] = useState({});
+  const [snack, setSnack] = useState({ open: false, message: "", severity: "success" });
+  const [justMovedRow, setJustMovedRow] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const markDone = (row) => {
+    if (!row) return;
+    setDoneMap(prev => ({ ...prev, [row]: true }));
+  };
+  const toast = (message, severity = "success") => {
+    setSnack({ open: true, message, severity });
+  };
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
 
@@ -147,6 +159,12 @@ export default function App() {
   }
 
   function prefillFromMySubmission(rec) {
+    if (rec?.row) {
+      const my0 = rec?.my_submission;
+      if (my0 && (my0.outcome !== undefined && my0.outcome !== "")) {
+        markDone(rec.row);
+      }
+    }
     const my = rec?.my_submission;
     if (my && my.outcome !== undefined && my.outcome !== "") {
       const v = Number(my.outcome);
@@ -162,31 +180,38 @@ export default function App() {
   }
 
   async function loadPatient(rowNum) {
+    setError("");
     if (!rowNum) return;
     const rec = await api.get("/patient", { params: { row: rowNum, include_my: 1 } });
     setActive(rec.data);
     prefillFromMySubmission(rec.data);
     setPickRow(String(rowNum));
     setAllDone(false);
+    setJustMovedRow(rowNum);
   }
 
   async function loadNext(afterRow = null) {
+    setError("");
     const r = await api.get("/next_patient", { params: { after: afterRow ?? undefined } });
     if (r.data?.complete) {
       setActive(null);
       setPickRow("");
       setAllDone(true);
+      toast("All patients completed. You can review or edit any entry from the dropdown.", "success");
       return { complete: true };
     }
     setActive(r.data);
     prefillFromMySubmission(r.data);
     setPickRow(String(r.data.row));
     setAllDone(false);
+    setJustMovedRow(r.data.row);
+    toast(`Now on patient row ${r.data.row}.`, "info");
     return { complete: false, row: r.data.row };
   }
 
   // If you switch the dropdown while in predict view, load that record (and prefill from your submission)
   useEffect(() => {
+    setError("");
     if (view !== "predict" || !pickRow) return;
     const rowNum = Number(pickRow);
     if (!rowNum) return;
@@ -207,6 +232,8 @@ export default function App() {
       await refreshProgress();   // load completed/total
       await refreshMetrics();
       await loadNext(null);      // load first unsubmitted
+      toast("Signed in. Loaded your next patient.", "success");
+      window.scrollTo({ top: 0, behavior: "smooth" });
       setView("predict");
     } catch {
       setError("Could not save user.");
@@ -215,6 +242,9 @@ export default function App() {
 
   async function submitPrediction() {
     if (!active) return;
+    setError("");
+    setSaving(true);
+    const wasUpdate = !!doneMap[active.row];
     try {
       await api.post("/submit_prediction", {
         row: active.row,
@@ -222,15 +252,19 @@ export default function App() {
         confidence: conf,
         snot22: snot,
       });
+      markDone(active.row);
+      toast(wasUpdate ? "Updated your prediction." : "Saved your prediction.", "success");
       await refreshProgress();
       await refreshMetrics();
       const next = await loadNext(active.row);
-      if (next.complete) {
-        setAllDone(true);
+      if (!next.complete && next.row) {
+        window.scrollTo({ top: 0, behavior: "smooth" });
       }
       await refresh(); // update dropdown list if needed
     } catch (e) {
       setError(e?.response?.data?.error || "Submit failed.");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -337,6 +371,8 @@ export default function App() {
               <Button
                 variant="outlined"
                 onClick={() => {
+                  setError("");
+                  setJustMovedRow(null);
                   setActive(null);
                   setView("menu");
                   setPickRow("");
@@ -357,6 +393,12 @@ export default function App() {
               Remaining: {Math.max(0, (progress.total - progress.completed))} / total: {progress.total}
             </Typography>
 
+            {justMovedRow && !allDone && (
+              <Alert severity="info" sx={{ mb: 2 }} onClose={() => setJustMovedRow(null)}>
+                Now showing patient row {justMovedRow}.
+              </Alert>
+            )}
+
             {allDone && (
               <Alert severity="success" sx={{ mb: 2 }}>
                 All patients completed. You can use the dropdown to review or edit your previous entries.
@@ -375,7 +417,7 @@ export default function App() {
                 >
                   {patients.map(p => (
                     <MenuItem key={p.row} value={String(p.row)}>
-                      {`Row ${p.row}`}
+                      {`Row ${p.row}${doneMap[p.row] ? " — done" : ""}`}
                     </MenuItem>
                   ))}
                 </Select>
@@ -433,8 +475,8 @@ export default function App() {
             </Box>
 
             <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="flex-start">
-              <Button variant="contained" onClick={submitPrediction}>
-                Save &amp; Next
+              <Button variant="contained" onClick={submitPrediction} disabled={saving || !active}>
+                {saving ? "Saving..." : "Save \u0026 Next"}
               </Button>
             </Stack>
           </Paper>
@@ -449,6 +491,16 @@ export default function App() {
             )}
         </Stack>
       )}
+      <Snackbar
+        open={snack.open}
+        autoHideDuration={2500}
+        onClose={() => setSnack(s => ({ ...s, open: false }))}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      >
+        <Alert onClose={() => setSnack(s => ({ ...s, open: false }))} severity={snack.severity} sx={{ width: "100%" }}>
+          {snack.message}
+        </Alert>
+      </Snackbar>
     </Container>
   );
 }
