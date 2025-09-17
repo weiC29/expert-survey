@@ -120,9 +120,15 @@ export default function App() {
 
   const [pickRow, setPickRow] = useState("");      // dropdown on menu & predict
   const [active, setActive] = useState(null);      // {row, record}
-  const [outcome, setOutcome] = useState(0);
-  const [conf, setConf] = useState("Somewhat confident");
-  const [snot, setSnot] = useState(24);
+  const DEFAULTS = { outcome: null, conf: "", snot: 0 };
+  const [outcome, setOutcome] = useState(DEFAULTS.outcome);
+  const [conf, setConf] = useState(DEFAULTS.conf);
+  const [snot, setSnot] = useState(DEFAULTS.snot);
+  const resetForm = () => {
+    setOutcome(DEFAULTS.outcome);
+    setConf(DEFAULTS.conf);
+    setSnot(DEFAULTS.snot);
+  };
   const [error, setError] = useState("");
 
   const apiBase = API;
@@ -181,6 +187,7 @@ export default function App() {
 
   async function loadPatient(rowNum) {
     setError("");
+    resetForm();
     if (!rowNum) return;
     const rec = await api.get("/patient", { params: { row: rowNum, include_my: 1 } });
     setActive(rec.data);
@@ -192,6 +199,7 @@ export default function App() {
 
   async function loadNext(afterRow = null) {
     setError("");
+    resetForm();
     const r = await api.get("/next_patient", { params: { after: afterRow ?? undefined } });
     if (r.data?.complete) {
       setActive(null);
@@ -244,6 +252,11 @@ export default function App() {
     if (!active) return;
     setError("");
     setSaving(true);
+    if (outcome === null || !conf) {
+      setSaving(false);
+      toast("Please select outcome and confidence before saving.", "error");
+      return;
+    }
     const wasUpdate = !!doneMap[active.row];
     try {
       await api.post("/submit_prediction", {
@@ -417,7 +430,7 @@ export default function App() {
                 >
                   {patients.map(p => (
                     <MenuItem key={p.row} value={String(p.row)}>
-                      {`Row ${p.row}${doneMap[p.row] ? " — done" : ""}`}
+                      {doneMap[p.row] ? `✅ Row ${p.row}` : `Row ${p.row}`}
                     </MenuItem>
                   ))}
                 </Select>
@@ -437,7 +450,12 @@ export default function App() {
             <Typography variant="body2" sx={{ mb: 1 }}>
               Outcome (0 = Unsuccessful, 1 = Successful)
             </Typography>
-            <RadioGroup row value={String(outcome)} onChange={(e)=>setOutcome(Number(e.target.value))} sx={{ mb: 2 }}>
+            <RadioGroup
+              row
+              value={outcome === null ? "" : String(outcome)}
+              onChange={(e)=>setOutcome(e.target.value === "" ? null : Number(e.target.value))}
+              sx={{ mb: 2 }}
+            >
               <FormControlLabel value="0" control={<Radio />} label="0 — Unsuccessful" />
               <FormControlLabel value="1" control={<Radio />} label="1 — Successful" />
             </RadioGroup>
